@@ -59,11 +59,11 @@ struct SweepEvent {
 // event for eventsHolder with comparator
 #[derive(Ord, Eq)]
 struct SweepEventComparedByEvents {
-    parent: SweepEvent,
+    parent: Rc<SweepEvent>,
 }
 
 impl SweepEventComparedByEvents {
-    fn new(e: SweepEvent) -> SweepEventComparedByEvents {
+    fn new(e: Rc<SweepEvent>) -> SweepEventComparedByEvents {
         Self {
             parent: e,
         }
@@ -141,12 +141,12 @@ impl PartialOrd<Self> for SweepEventComparedByEvents {
 }
 
 impl SweepEvent {
-    fn new(p: Rc<Point>, left: bool, pl: PolygonType, other: Option<Rc<SweepEvent>>, tp: EdgeType) -> SweepEvent {
-        Self {p, left, pl, other, in_out: left, tp, inside: false, poss: BTreeSet::new() }
+    fn new(p: Rc<Point>, left: bool, pl: PolygonType, other: Option<Rc<SweepEvent>>, tp: EdgeType) -> Rc<SweepEvent> {
+        Rc::new(Self {p: p.clone(), left, pl, other, in_out: left, tp, inside: false, poss: BTreeSet::new() })
     }
 
-    fn from_point(p: Rc<Point>) -> SweepEvent {
-        Self {p, left: false, pl: PolygonType::Subject, other: None, in_out: false, tp: EdgeType::Normal, inside: false, poss: BTreeSet::new()}
+    fn from_point(p: Rc<Point>) -> Rc<SweepEvent> {
+        Rc::new(Self {p: p.clone(), left: false, pl: PolygonType::Subject, other: None, in_out: false, tp: EdgeType::Normal, inside: false, poss: BTreeSet::new()})
     }
 
     fn segment(&self) -> LineSegment {
@@ -181,7 +181,7 @@ impl SweepEvent {
 }
 
 struct EventsHolder {
-    queue: BinaryHeap<Reverse<Rc<SweepEventComparedByEvents>>>
+    queue: BinaryHeap<Reverse<SweepEventComparedByEvents>>
 }
 
 impl EventsHolder {
@@ -189,11 +189,11 @@ impl EventsHolder {
         EventsHolder{queue: BinaryHeap::new()}
     }
 
-    fn push(&mut self, e: Rc<SweepEventComparedByEvents>) {
+    fn push(&mut self, e: SweepEventComparedByEvents) {
         self.queue.push(Reverse(e))
     }
 
-    fn pop(&mut self) -> Option<Rc<SweepEventComparedByEvents>> {
+    fn pop(&mut self) -> Option<SweepEventComparedByEvents> {
         return match self.queue.pop() {
             None => None,
             Some(x) => Some(x.0)
@@ -258,11 +258,11 @@ mod tests {
     fn test_sweep_event_queued_comparator(){
         // sweep event comparison x coordinates
         let mut p1 = Rc::new(Point::new([0.0, 0.0]));
-        let mut e1 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::from_point(p1)));
+        let mut e1 = SweepEventComparedByEvents::new(SweepEvent::from_point(p1));
         let mut p2 = Rc::new(Point::new([0.5, 0.5]));
-        let mut e2 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::from_point(p2)));
+        let mut e2 = SweepEventComparedByEvents::new(SweepEvent::from_point(p2));
 
-        match e1.as_ref().partial_cmp(e2.as_ref()) {
+        match e1.partial_cmp(&e2) {
             None => panic!("None cmp"),
             Some(x) => match x {
                 Less => println!("ok"),
@@ -270,7 +270,7 @@ mod tests {
             },
         }
 
-        match e2.as_ref().partial_cmp(e1.as_ref()) {
+        match e2.partial_cmp(&e1) {
             None => panic!("None cmp"),
             Some(x) => match x {
                 Greater => println!("ok"),
@@ -280,11 +280,11 @@ mod tests {
 
         // sweep event comparison y coordinates'
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::from_point(p1)));
+        e1 = SweepEventComparedByEvents::new(SweepEvent::from_point(p1));
         p2 = Rc::new(Point::new([0.0, 0.5]));
-        e2 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::from_point(p2)));
+        e2 = SweepEventComparedByEvents::new(SweepEvent::from_point(p2));
 
-        match e1.as_ref().partial_cmp(e2.as_ref()) {
+        match e1.partial_cmp(&e2) {
             None => panic!("None cmp"),
             Some(x) => match x {
                 Less => println!("ok"),
@@ -292,7 +292,7 @@ mod tests {
             },
         }
 
-        match e2.as_ref().partial_cmp(e1.as_ref()) {
+        match e2.partial_cmp(&e1) {
             None => panic!("None cmp"),
             Some(x) => match x {
                 Greater => println!("ok"),
@@ -302,11 +302,11 @@ mod tests {
 
         // sweep event comparison not left firs
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::new(p1, true, PolygonType::Clipping,None, EdgeType::Normal)));
+        e1 = SweepEventComparedByEvents::new(SweepEvent::new(p1, true, PolygonType::Clipping,None, EdgeType::Normal));
         p2 = Rc::new(Point::new([0.0, 0.0]));
-        e2 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::new(p2, false, PolygonType::Clipping,None, EdgeType::Normal)));
+        e2 = SweepEventComparedByEvents::new(SweepEvent::new(p2, false, PolygonType::Clipping,None, EdgeType::Normal));
 
-        match e2.as_ref().partial_cmp(e1.as_ref()) {
+        match e2.partial_cmp(&e1) {
             None => panic!("None cmp"),
             Some(x) => match x {
                 Less => println!("ok"),
@@ -314,7 +314,7 @@ mod tests {
             },
         }
 
-        match e1.as_ref().partial_cmp(e2.as_ref()) {
+        match e1.partial_cmp(&e2) {
             None => panic!("None cmp"),
             Some(x) => match x {
                 Greater => println!("ok"),
@@ -324,16 +324,16 @@ mod tests {
 
         // sweep event comparison shared start point not collinear edges
         let mut poe1 = Rc::new(Point::new([1.0, 1.0]));
-        let mut eo1 = Rc::new(SweepEvent::new(poe1, false, PolygonType::Clipping,None, EdgeType::Normal));
+        let mut eo1 = SweepEvent::new(poe1, false, PolygonType::Clipping,None, EdgeType::Normal);
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::new(p1, true, PolygonType::Clipping,Some(eo1), EdgeType::Normal)));
+        e1 = SweepEventComparedByEvents::new(SweepEvent::new(p1, true, PolygonType::Clipping, Some(eo1), EdgeType::Normal));
 
         let mut poe2 = Rc::new(Point::new([2.0, 3.0]));
-        let mut eo2 = Rc::new(SweepEvent::new(poe2, false, PolygonType::Clipping,None, EdgeType::Normal));
+        let mut eo2 = SweepEvent::new(poe2, false, PolygonType::Clipping,None, EdgeType::Normal);
         p2 = Rc::new(Point::new([0.0, 0.0]));
-        e2 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::new(p2, true, PolygonType::Clipping,Some(eo2), EdgeType::Normal)));
+        e2 = SweepEventComparedByEvents::new(SweepEvent::new(p2, true, PolygonType::Clipping,Some(eo2), EdgeType::Normal));
 
-        match e1.as_ref().partial_cmp(e2.as_ref()) {
+        match e1.partial_cmp(&e2) {
             None => panic!("None cmp"),
             Some(x) => match x {
                 Less => println!("ok"),
@@ -341,7 +341,7 @@ mod tests {
             },
         }
 
-        match e2.as_ref().partial_cmp(e1.as_ref()) {
+        match e2.partial_cmp(&e1) {
             None => panic!("None cmp"),
             Some(x) => match x {
                 Greater => println!("ok"),
@@ -351,16 +351,16 @@ mod tests {
 
         // sweep event comparison collinear edges
         poe1 = Rc::new(Point::new([1.0, 1.0]));
-        eo1 = Rc::new(SweepEvent::new(poe1, false, PolygonType::Clipping,None, EdgeType::Normal));
+        eo1 = SweepEvent::new(poe1, false, PolygonType::Clipping,None, EdgeType::Normal);
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::new(p1, true, PolygonType::Clipping, Some(eo1), EdgeType::Normal)));
+        e1 = SweepEventComparedByEvents::new(SweepEvent::new(p1, true, PolygonType::Clipping, Some(eo1), EdgeType::Normal));
 
         poe2 = Rc::new(Point::new([2.0, 2.0]));
-        eo2 = Rc::new(SweepEvent::new(poe2, false, PolygonType::Subject,None, EdgeType::Normal));
+        eo2 = SweepEvent::new(poe2, false, PolygonType::Subject,None, EdgeType::Normal);
         p2 = Rc::new(Point::new([0.0, 0.0]));
-        e2 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::new(p2, true, PolygonType::Subject, Some(eo2), EdgeType::Normal)));
+        e2 = SweepEventComparedByEvents::new(SweepEvent::new(p2, true, PolygonType::Subject, Some(eo2), EdgeType::Normal));
 
-        match e1.as_ref().partial_cmp(e2.as_ref()) {
+        match e1.partial_cmp(&e2) {
             None => panic!("None cmp"),
             Some(x) => match x {
                 Less => println!("ok"),
@@ -368,7 +368,7 @@ mod tests {
             },
         }
 
-        match e2.as_ref().partial_cmp(e1.as_ref()) {
+        match e2.partial_cmp(&e1) {
             None => panic!("None cmp"),
             Some(x) => match x {
                 Greater => println!("ok"),
@@ -378,79 +378,79 @@ mod tests {
 
         // queue should process lest(by x) sweep event first
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::from_point(p1)));
+        e1 = SweepEventComparedByEvents::new(SweepEvent::from_point(p1.clone()));
         p2 = Rc::new(Point::new([0.5, 0.5]));
-        e2 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::from_point(p2)));
+        e2 = SweepEventComparedByEvents::new(SweepEvent::from_point(p2.clone()));
 
         let mut event_holder = EventsHolder::new();
-        event_holder.push(e2.clone());
-        event_holder.push(e1.clone());
+        event_holder.push(e2);
+        event_holder.push(e1);
 
         match event_holder.pop() {
             None => panic!("Empty queue"),
             Some(x) => {
-                assert_eq!(x.parent.p.clone().array[0], e1.parent.p.clone().array[0]);
-                assert_eq!(x.parent.p.clone().array[1], e1.parent.p.clone().array[1]);
+                assert_eq!(x.parent.p.clone().array[0], p1.clone().array[0]);
+                assert_eq!(x.parent.p.clone().array[1], p1.clone().array[1]);
             }
         }
 
         match event_holder.pop() {
             None => panic!("Empty queue"),
             Some(x) => {
-                assert_eq!(x.parent.p.clone().array[0], e2.parent.p.clone().array[0]);
-                assert_eq!(x.parent.p.clone().array[1], e2.parent.p.clone().array[1]);
+                assert_eq!(x.parent.p.clone().array[0], p2.clone().array[0]);
+                assert_eq!(x.parent.p.clone().array[1], p2.clone().array[1]);
             }
         }
 
         // queue should process lest(by y) sweep event first
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::from_point(p1)));
+        e1 = SweepEventComparedByEvents::new(SweepEvent::from_point(p1.clone()));
         p2 = Rc::new(Point::new([0.0, 0.5]));
-        e2 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::from_point(p2)));
+        e2 = SweepEventComparedByEvents::new(SweepEvent::from_point(p2.clone()));
 
         event_holder = EventsHolder::new();
-        event_holder.push(e2.clone());
-        event_holder.push(e1.clone());
+        event_holder.push(e2);
+        event_holder.push(e1);
 
         match event_holder.pop() {
             None => panic!("Empty queue"),
             Some(x) => {
-                assert_eq!(x.parent.p.clone().array[0], e1.parent.p.clone().array[0]);
-                assert_eq!(x.parent.p.clone().array[1], e1.parent.p.clone().array[1]);
+                assert_eq!(x.parent.p.clone().array[0], p1.clone().array[0]);
+                assert_eq!(x.parent.p.clone().array[1], p1.clone().array[1]);
             }
         }
 
         match event_holder.pop() {
             None => panic!("Empty queue"),
             Some(x) => {
-                assert_eq!(x.parent.p.clone().array[0], e2.parent.p.clone().array[0]);
-                assert_eq!(x.parent.p.clone().array[1], e2.parent.p.clone().array[1]);
+                assert_eq!(x.parent.p.clone().array[0], p2.clone().array[0]);
+                assert_eq!(x.parent.p.clone().array[1], p2.clone().array[1]);
             }
         }
 
         // 'queue should pop least(by left prop) sweep event first
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::new(p1, true, Subject, None, EdgeType::Normal)));
+        e1 = SweepEventComparedByEvents::new(SweepEvent::new(p1.clone(), true, Subject, None, EdgeType::Normal));
         p2 = Rc::new(Point::new([0.0, 0.0]));
-        e2 = Rc::new(SweepEventComparedByEvents::new(SweepEvent::new(p2, false, Subject, None, EdgeType::Normal)));
+        e2 = SweepEventComparedByEvents::new(SweepEvent::new(p2.clone(), false, Subject, None, EdgeType::Normal));
 
         event_holder = EventsHolder::new();
-        event_holder.push(e1.clone());
-        event_holder.push(e2.clone());
+        event_holder.push(e1);
+        event_holder.push(e2);
 
         match event_holder.pop() {
             None => panic!("Empty queue"),
             Some(x) => {
-                assert_eq!(x.parent.p.clone().array[0], e2.parent.p.clone().array[0]);
-                assert_eq!(x.parent.p.clone().array[1], e2.parent.p.clone().array[1]);
+                assert_eq!(x.parent.p.clone().array[0], p2.clone().array[0]);
+                assert_eq!(x.parent.p.clone().array[1], p2.clone().array[1]);
             }
         }
 
         match event_holder.pop() {
             None => panic!("Empty queue"),
             Some(x) => {
-                assert_eq!(x.parent.p.clone().array[0], e1.parent.p.clone().array[0]);
-                assert_eq!(x.parent.p.clone().array[1], e1.parent.p.clone().array[1]);
+                assert_eq!(x.parent.p.clone().array[0], p1.clone().array[0]);
+                assert_eq!(x.parent.p.clone().array[1], p1.clone().array[1]);
             }
         }
     }
