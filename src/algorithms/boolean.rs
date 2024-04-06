@@ -1,6 +1,8 @@
+mod utils;
+mod event_holder;
+
 use crate::data::Polygon;
 use std::vec::Vec;
-pub mod martinez;
 
 pub trait Operations<T> {
     fn intersection(subject: &Polygon<T>, clipping: &Polygon<T>) -> Vec<Polygon<T>>;
