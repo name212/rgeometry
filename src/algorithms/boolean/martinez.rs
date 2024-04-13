@@ -56,51 +56,67 @@ enum EdgeType {
     SameTransition,
     DifferentTransition
 }
-#[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
-enum PolygonType {
-    Subject,
-    Clipping
-}
 
 type Point = crate::data::Point<f64>;
 type LineSegment = crate::data::LineSegment<f64>;
 
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq)]
 struct SweepEvent {
-    // point associated with the event
-    p: Rc<Point>,
     // is the point the left endpoint of the segment (p, other->p)?
     left: bool,
-    // Polygon to which the associated segment belongs to
-    pl: PolygonType,
+    // point associated with the event
+    p: Rc<Point>,
     // Event associated to the other endpoint of the segment
     other: Rc<Option<SweepEvent>>,
+    // Polygon to which the associated segment belongs to
+    is_subject: bool,
+    // Edge contribution type
+    tp: EdgeType,
     // Does the segment (p, other->p) represent an inside-outside transition in the polygon for a vertical ray from (p.x, -infinite) that crosses the segment?
     in_out: bool,
-    tp: EdgeType,
     // Only used in "left" events. Is the segment (p, other->p) inside the other polygon?
-    inside: bool,
-    // Only used in "left" events. Position of the event (line segment) in S
-    poss: BTreeSet<Rc<SweepEvent>>,
+    other_in_out: bool,
+    // Previous event in result?
+    prev_in_result: Rc<Option<SweepEvent>>,
+    // Type of result transition (0 = not in result, +1 = out-in, -1, in-out)
+    result_transition: i64,
 
-    contour_id: i64
+    // connection step
+    other_pos: i64,
+    output_contour_id: i64,
+    contour_id: i64,
+    is_exterior_ring: bool,
 }
 
 //----------------------------------------sweep_event.js----------------------------------------------
 impl SweepEvent {
-    fn new(p: Rc<Point>, left: bool, pl: PolygonType, other: Rc<Option<SweepEvent>>, tp: EdgeType) -> SweepEvent {
-        Self {p: p.clone(), left, pl, other, in_out: left, tp, inside: false, poss: BTreeSet::new(), contour_id: 0 }
+    fn new(p: Rc<Point>, left: bool, other: Rc<Option<SweepEvent>>, is_subject: bool, tp: EdgeType) -> SweepEvent {
+        Self {
+            p: Rc::clone(&p),
+            left,
+            is_subject,
+            other,
+            in_out: false,
+            tp,
+            contour_id: 0,
+            other_pos: -1,
+            output_contour_id: -1,
+            result_transition: 0,
+            prev_in_result: Rc::new(None),
+            other_in_out: false,
+            is_exterior_ring: true,
+        }
     }
 
     fn from_point(p: Rc<Point>) -> SweepEvent {
-        Self {p: p.clone(), left: false, pl: PolygonType::Subject, other: Rc::new(None), in_out: false, tp: EdgeType::Normal, inside: false, poss: BTreeSet::new(), contour_id: 0}
+        return Self::new(p, false, Rc::new(None), false, EdgeType::Normal);
     }
     fn nothing() -> Self {
         Self::new(
             Rc::new(Point::new([0.0, 0.0])),
             false,
-            PolygonType::Clipping,
             Rc::new(None),
+            false,
             EdgeType::Normal
         )
     }
@@ -149,32 +165,32 @@ mod sweep_event_tests{
         let s1 = SweepEvent::new(
             Rc::new(Point::new([0.0, 0.0])),
             true,
-            PolygonType::Clipping,
             Rc::new(Some(
                 SweepEvent::new(
                     Rc::new(Point::new([1.0, 1.0])),
                     false,
-                    PolygonType::Clipping,
                     Rc::new(None),
+                    false,
                     EdgeType::Normal
                 )
             )),
+            false,
             EdgeType::Normal
         );
 
         let s2 = SweepEvent::new(
             Rc::new(Point::new([0.0, 1.0])),
             false,
-            PolygonType::Clipping,
             Rc::new(Some(
                 SweepEvent::new(
                     Rc::new(Point::new([0.0, 0.0])),
                     false,
-                    PolygonType::Clipping,
                     Rc::new(None),
+                    false,
                     EdgeType::Normal
                 )
             )),
+            false,
             EdgeType::Normal
         );
 
@@ -194,32 +210,32 @@ mod sweep_event_tests{
         let s1 = SweepEvent::new(
             Rc::new(Point::new([0.0, 0.0])),
             true,
-            PolygonType::Clipping,
             Rc::new(Some(
                 SweepEvent::new(
                     Rc::new(Point::new([1.0, 1.0])),
                     false,
-                    PolygonType::Clipping,
                     Rc::new(None),
+                    false,
                     EdgeType::Normal
                 )
             )),
+            false,
             EdgeType::Normal
         );
 
         let s2 = SweepEvent::new(
             Rc::new(Point::new([0.0, 1.0])),
             false,
-            PolygonType::Clipping,
             Rc::new(Some(
                 SweepEvent::new(
                     Rc::new(Point::new([0.0, 0.0])),
                     false,
-                    PolygonType::Clipping,
                     Rc::new(None),
+                    false,
                     EdgeType::Normal
                 )
             )),
+            false,
             EdgeType::Normal
         );
 
@@ -335,7 +351,7 @@ impl PartialOrd<Self> for SweepEventComparedByEvents {
             }
         }
 
-        return if self.parent.pl == PolygonType::Clipping && other.parent.pl == PolygonType::Subject {
+        return if !self.parent.is_subject && other.parent.is_subject {
             Some(Less)
         } else {
             Some(Greater)
@@ -346,7 +362,6 @@ impl PartialOrd<Self> for SweepEventComparedByEvents {
 //----------------------------------compare_events.test.js-------------------------------/
 #[cfg(test)]
 mod sweep_event_compared_by_events_tests {
-    use crate::algorithms::boolean::martinez::PolygonType::Subject;
     use super::*;
 
     #[test]
@@ -397,9 +412,9 @@ mod sweep_event_compared_by_events_tests {
 
         // sweep event comparison not left firs
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p1, true, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)));
+        e1 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p1, true, Rc::new(None), false, EdgeType::Normal)));
         p2 = Rc::new(Point::new([0.0, 0.0]));
-        e2 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p2, false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)));
+        e2 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p2, false, Rc::new(None), false, EdgeType::Normal)));
 
         match e2.partial_cmp(&e1) {
             None => panic!("None cmp"),
@@ -419,14 +434,14 @@ mod sweep_event_compared_by_events_tests {
 
         // sweep event comparison shared start point not collinear edges
         let mut poe1 = Rc::new(Point::new([1.0, 1.0]));
-        let mut eo1 = SweepEvent::new(poe1, false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal);
+        let mut eo1 = SweepEvent::new(poe1, false, Rc::new(None), false, EdgeType::Normal);
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p1, true, PolygonType::Clipping, Rc::new(Some(eo1)), EdgeType::Normal)));
+        e1 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p1, true, Rc::new(Some(eo1)), false, EdgeType::Normal)));
 
         let mut poe2 = Rc::new(Point::new([2.0, 3.0]));
-        let mut eo2 = SweepEvent::new(poe2, false, PolygonType::Clipping,Rc::new(None), EdgeType::Normal);
+        let mut eo2 = SweepEvent::new(poe2, false,Rc::new(None), false, EdgeType::Normal);
         p2 = Rc::new(Point::new([0.0, 0.0]));
-        e2 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p2, true, PolygonType::Clipping, Rc::new(Some(eo2)), EdgeType::Normal)));
+        e2 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p2, true, Rc::new(Some(eo2)), false, EdgeType::Normal)));
 
         match e1.partial_cmp(&e2) {
             None => panic!("None cmp"),
@@ -446,14 +461,14 @@ mod sweep_event_compared_by_events_tests {
 
         // sweep event comparison collinear edges
         poe1 = Rc::new(Point::new([1.0, 1.0]));
-        eo1 = SweepEvent::new(poe1, false, PolygonType::Clipping,Rc::new(None), EdgeType::Normal);
+        eo1 = SweepEvent::new(poe1, false, Rc::new(None), false, EdgeType::Normal);
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p1, true, PolygonType::Clipping, Rc::new(Some(eo1)), EdgeType::Normal)));
+        e1 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p1, true, Rc::new(Some(eo1)),false, EdgeType::Normal)));
 
         poe2 = Rc::new(Point::new([2.0, 2.0]));
-        eo2 = SweepEvent::new(poe2, false, PolygonType::Subject, Rc::new(None), EdgeType::Normal);
+        eo2 = SweepEvent::new(poe2, false, Rc::new(None), false, EdgeType::Normal);
         p2 = Rc::new(Point::new([0.0, 0.0]));
-        e2 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p2, true, PolygonType::Subject, Rc::new(Some(eo2)), EdgeType::Normal)));
+        e2 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p2, true, Rc::new(Some(eo2)), true, EdgeType::Normal)));
 
         match e1.partial_cmp(&e2) {
             None => panic!("None cmp"),
@@ -525,9 +540,9 @@ mod sweep_event_compared_by_events_tests {
 
         // 'queue should pop least(by left prop) sweep event first
         p1 = Rc::new(Point::new([0.0, 0.0]));
-        e1 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p1.clone(), true, Subject, Rc::new(None), EdgeType::Normal)));
+        e1 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p1.clone(), true, Rc::new(None), true, EdgeType::Normal)));
         p2 = Rc::new(Point::new([0.0, 0.0]));
-        e2 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p2.clone(), false, Subject, Rc::new(None), EdgeType::Normal)));
+        e2 = SweepEventComparedByEvents::new(Rc::new(SweepEvent::new(p2.clone(), false, Rc::new(None), true, EdgeType::Normal)));
 
         event_holder = EventsHolder::new();
         event_holder.push(e1);
@@ -633,7 +648,7 @@ impl PartialOrd<Self> for SweepEventComparedBySegments {
             return Some(Greater)
         }
 
-        if self.parent.pl == other.parent.pl { // same polygon
+        if self.parent.is_subject == other.parent.is_subject { // same polygon
             if self.parent.p.eq(&other.parent.p){
                 if self_other.p.eq(&other_other.p) {
                    return Some(Equal)
@@ -652,7 +667,7 @@ impl PartialOrd<Self> for SweepEventComparedBySegments {
                 }
             }
         } else { // Segments are collinear, but belong to separate polygons
-            return if self.parent.pl == PolygonType::Subject {
+            return if self.parent.is_subject {
                 return Some(Less);
             } else {
                 return Some(Greater);
@@ -681,15 +696,15 @@ mod sweep_event_compared_by_segments_tests{
         let mut heap = BinaryHeap::new();
         let pt = Rc::new(Point::new([0.0, 0.0]));
         let se1 = SweepEventComparedBySegments::new(
-           Rc::new(SweepEvent::new(Rc::clone(&pt), true, PolygonType::Clipping, Rc::new(Some(
-               SweepEvent::new(Rc::new(Point::new([1.0, 1.0])), false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)
-           )), EdgeType::Normal)
+           Rc::new(SweepEvent::new(Rc::clone(&pt), true, Rc::new(Some(
+               SweepEvent::new(Rc::new(Point::new([1.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+           )), false, EdgeType::Normal)
         ));
 
         let se2 = SweepEventComparedBySegments::new(
-            Rc::new(SweepEvent::new(Rc::clone(&pt), true, PolygonType::Clipping, Rc::new(Some(
-                SweepEvent::new(Rc::new(Point::new([2.0, 3.0])), false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)
-            )), EdgeType::Normal)
+            Rc::new(SweepEvent::new(Rc::clone(&pt), true, Rc::new(Some(
+                SweepEvent::new(Rc::new(Point::new([2.0, 3.0])), false, Rc::new(None), false, EdgeType::Normal)
+            )), false, EdgeType::Normal)
         ));
 
         heap.push(se1);
@@ -723,15 +738,15 @@ mod sweep_event_compared_by_segments_tests{
         let mut heap = BinaryHeap::new();
 
         let se1 = SweepEventComparedBySegments::new(
-            Rc::new(SweepEvent::new(Rc::new(Point::new([0.0, 1.0])), true, PolygonType::Clipping, Rc::new(Some(
-                SweepEvent::new(Rc::new(Point::new([1.0, 1.0])), false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)
-            )), EdgeType::Normal)
+            Rc::new(SweepEvent::new(Rc::new(Point::new([0.0, 1.0])), true, Rc::new(Some(
+                SweepEvent::new(Rc::new(Point::new([1.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+            )), false, EdgeType::Normal)
             ));
 
         let se2 = SweepEventComparedBySegments::new(
-            Rc::new(SweepEvent::new(Rc::new(Point::new([0.0, 2.0])), true, PolygonType::Clipping, Rc::new(Some(
-                SweepEvent::new(Rc::new(Point::new([2.0, 3.0])), false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)
-            )), EdgeType::Normal)
+            Rc::new(SweepEvent::new(Rc::new(Point::new([0.0, 2.0])), true, Rc::new(Some(
+                SweepEvent::new(Rc::new(Point::new([2.0, 3.0])), false, Rc::new(None), false, EdgeType::Normal)
+            )), false, EdgeType::Normal)
             ));
 
         heap.push(se1);
@@ -762,21 +777,21 @@ mod sweep_event_compared_by_segments_tests{
     fn test_not_collinear_3() {
         // events order in sweep line
 
-        let e1 = Rc::new(SweepEvent::new(Rc::new(Point::new([0.0, 1.0])), true, PolygonType::Clipping, Rc::new(Some(
-            SweepEvent::new(Rc::new(Point::new([2.0, 1.0])), false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)
-        )), EdgeType::Normal));
+        let e1 = Rc::new(SweepEvent::new(Rc::new(Point::new([0.0, 1.0])), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([2.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal));
 
-        let e2 = Rc::new(SweepEvent::new(Rc::new(Point::new([-1.0, 0.0])), true, PolygonType::Clipping, Rc::new(Some(
-            SweepEvent::new(Rc::new(Point::new([2.0, 3.0])), false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)
-        )), EdgeType::Normal));
+        let e2 = Rc::new(SweepEvent::new(Rc::new(Point::new([-1.0, 0.0])), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([2.0, 3.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal));
 
-        let e3 = Rc::new(SweepEvent::new(Rc::new(Point::new([0.0, 1.0])), true, PolygonType::Clipping, Rc::new(Some(
-            SweepEvent::new(Rc::new(Point::new([3.0, 4.0])), false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)
-        )), EdgeType::Normal));
+        let e3 = Rc::new(SweepEvent::new(Rc::new(Point::new([0.0, 1.0])), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([3.0, 4.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal));
 
-        let e4 = Rc::new(SweepEvent::new(Rc::new(Point::new([-1.0, 0.0])), true, PolygonType::Clipping, Rc::new(Some(
-            SweepEvent::new(Rc::new(Point::new([3.0, 1.0])), false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)
-        )), EdgeType::Normal));
+        let e4 = Rc::new(SweepEvent::new(Rc::new(Point::new([-1.0, 0.0])), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([3.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal));
 
         let se1 = SweepEventComparedBySegments::new(Rc::clone(&e1));
 
@@ -797,13 +812,13 @@ mod sweep_event_compared_by_segments_tests{
     fn test_not_collinear_4() {
         // first point is below
 
-        let e1 = Rc::new(SweepEvent::new(Rc::new(Point::new([0.0, 1.0])), true, PolygonType::Clipping, Rc::new(Some(
-            SweepEvent::new(Rc::new(Point::new([2.0, 1.0])), false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)
-        )), EdgeType::Normal));
+        let e1 = Rc::new(SweepEvent::new(Rc::new(Point::new([0.0, 1.0])), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([2.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal));
 
-        let e2 = Rc::new(SweepEvent::new(Rc::new(Point::new([-1.0, 0.0])), true, PolygonType::Clipping, Rc::new(Some(
-            SweepEvent::new(Rc::new(Point::new([2.0, 3.0])), false, PolygonType::Clipping, Rc::new(None), EdgeType::Normal)
-        )), EdgeType::Normal));
+        let e2 = Rc::new(SweepEvent::new(Rc::new(Point::new([-1.0, 0.0])), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([2.0, 3.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal));
 
         let se2 = SweepEventComparedBySegments::new(Rc::clone(&e1));
 
@@ -813,4 +828,22 @@ mod sweep_event_compared_by_segments_tests{
         assert_eq!(se1.partial_cmp(&se2), Some(Greater))
     }
 
+    #[test]
+    fn test_collinear_1() {
+        // collinear segment
+        let e1 = Rc::new(SweepEvent::new(Rc::new(Point::new([1.0, 1.0])), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([5.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), true, EdgeType::Normal));
+
+        let e2 = Rc::new(SweepEvent::new(Rc::new(Point::new([2.0, 1.0])), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([3.0, 3.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal));
+
+        let se1 = SweepEventComparedBySegments::new(Rc::clone(&e1));
+
+        let se2 = SweepEventComparedBySegments::new(Rc::clone(&e2));
+
+        assert_ne!(se1.parent.is_subject, se2.parent.is_subject);
+        assert_eq!(se1.partial_cmp(&se2), Some(Greater))
+    }
 }
