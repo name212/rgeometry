@@ -829,7 +829,7 @@ mod sweep_event_compared_by_segments_tests{
     }
 
     #[test]
-    fn test_collinear_1() {
+    fn test_collinear_segments() {
         // collinear segment
         let e1 = Rc::new(SweepEvent::new(Rc::new(Point::new([1.0, 1.0])), true, Rc::new(Some(
             SweepEvent::new(Rc::new(Point::new([5.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
@@ -845,5 +845,70 @@ mod sweep_event_compared_by_segments_tests{
 
         assert_ne!(se1.parent.is_subject, se2.parent.is_subject);
         assert_eq!(se1.partial_cmp(&se2), Some(Greater))
+    }
+
+    #[test]
+    fn test_collinear_shared_left_point() {
+        // collinear shared left point
+        let pt = Rc::new(Point::new([0.0, 1.0]));
+
+        let mut e1 = SweepEvent::new(Rc::clone(&pt), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([5.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal);
+
+        let mut e2 = SweepEvent::new(Rc::clone(&pt), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([3.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal);
+
+        e1.contour_id = 1;
+        e2.contour_id = 2;
+
+        let mut se1 = SweepEventComparedBySegments::new(Rc::clone(&Rc::new(e1)));
+
+        let mut se2 = SweepEventComparedBySegments::new(Rc::clone(&Rc::new(e2)));
+
+
+        assert_eq!(se1.parent.is_subject, se2.parent.is_subject);
+        assert_eq!(se1.parent.p, se2.parent.p);
+
+        assert_eq!(se1.partial_cmp(&se2), Some(Less));
+
+        let mut e3 = SweepEvent::new(Rc::clone(&pt), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([5.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal);
+
+        let mut e4 = SweepEvent::new(Rc::clone(&pt), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([3.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), false, EdgeType::Normal);
+
+        e3.contour_id = 2;
+        e4.contour_id = 1;
+
+        let se3 = SweepEventComparedBySegments::new(Rc::clone(&Rc::new(e3)));
+        let se4 = SweepEventComparedBySegments::new(Rc::clone(&Rc::new(e4)));
+
+        assert_eq!(se3.partial_cmp(&se4), Some(Greater));
+    }
+
+    #[test]
+    fn test_collinear_same_polygon_different_left_points() {
+        // collinear same polygon different left points
+        let e1 = Rc::new(SweepEvent::new(Rc::new(Point::new([1.0, 1.0])), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([5.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), true, EdgeType::Normal));
+
+        let e2 = Rc::new(SweepEvent::new(Rc::new(Point::new([2.0, 1.0])), true, Rc::new(Some(
+            SweepEvent::new(Rc::new(Point::new([3.0, 1.0])), false, Rc::new(None), false, EdgeType::Normal)
+        )), true, EdgeType::Normal));
+
+        let se1 = SweepEventComparedBySegments::new(Rc::clone(&e1));
+
+        let se2 = SweepEventComparedBySegments::new(Rc::clone(&e2));
+
+        assert_eq!(se1.parent.is_subject, se2.parent.is_subject);
+        assert_ne!(se1.parent.p, se2.parent.p);
+
+        assert_eq!(se1.partial_cmp(&se2), Some(Less));
+        assert_eq!(se2.partial_cmp(&se1), Some(Greater));
     }
 }
